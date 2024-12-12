@@ -13,17 +13,12 @@ pub fn main() {
   let _ = actor.continue
   let _ = None
 
-  // You can use print statements as follows for debugging, they'll be visible when running tests.
-  io.println("Logs from your program will appear here!")
+  let assert Ok(_) =
+    glisten.handler(fn(_conn) { #(Nil, None) }, fn(_msg, state, _conn) {
+      io.println("Received message!")
+      actor.continue(state)
+    })
+    |> glisten.serve(9092)
 
-  // Uncomment this block to pass the first stage
-  //
-  // let assert Ok(_) =
-  //   glisten.handler(fn(_conn) { #(Nil, None) }, fn(_msg, state, _conn) {
-  //     io.println("Received message!")
-  //     actor.continue(state)
-  //   })
-  //   |> glisten.serve(9092)
-  //
-  // process.sleep_forever()
+  process.sleep_forever()
 }
