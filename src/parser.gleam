@@ -1,4 +1,5 @@
 // import gleam/option.{None, Some}
+import gleam/dict
 import gleam/result
 
 pub type ParseHeaderError {
@@ -20,6 +21,10 @@ pub type ApiKey {
   ApiVersions
 }
 
+pub fn supported_apis() {
+  dict.from_list([#(ApiVersions, #(3, 4))])
+}
+
 // TODO: implement the same function that does the conversion the other way
 fn api_key_from_int(i) {
   case i {
@@ -28,10 +33,16 @@ fn api_key_from_int(i) {
   }
 }
 
+pub fn api_key_to_int(api_key) {
+  case api_key {
+    ApiVersions -> 18
+  }
+}
+
 fn validate_version(key, version) {
-  case key {
-    ApiVersions -> 0 <= version && version <= 4
-    // _ -> False
+  case dict.get(supported_apis(), key) {
+    Error(_) -> False
+    Ok(#(low, high)) -> low <= version && version <= high
   }
 }
 
