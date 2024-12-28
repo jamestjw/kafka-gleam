@@ -1,56 +1,10 @@
-import gleam/dict
+import gleam/option
 import gleam/result
+import request.{type RequestHeader, Header}
 
 pub type ParseHeaderError {
-  UnsupportedApiKey
-  UnsupportedApiVersion
   MalformedHeader
-}
-
-pub type RequestHeader {
-  Header(
-    message_size: Int,
-    request_api_key: ApiKey,
-    request_api_version: Int,
-    correlation_id: Int,
-  )
-}
-
-pub type ApiKey {
-  ApiVersions
-  DescribeTopicPartitions
-}
-
-pub fn supported_apis() {
-  dict.from_list([#(ApiVersions, #(0, 4)), #(DescribeTopicPartitions, #(0, 0))])
-}
-
-// TODO: implement the same function that does the conversion the other way
-fn api_key_from_int(i) {
-  case i {
-    18 -> Ok(ApiVersions)
-    75 -> Ok(DescribeTopicPartitions)
-    _ -> Error(UnsupportedApiKey)
-  }
-}
-
-pub fn api_key_to_int(api_key) {
-  case api_key {
-    ApiVersions -> 18
-    DescribeTopicPartitions -> 75
-  }
-}
-
-fn validate_version(key, version) {
-  case dict.get(supported_apis(), key) {
-    Error(_) -> False
-    Ok(#(low, high)) -> low <= version && version <= high
-  }
-}
-
-pub fn validate_header_api_version(header) {
-  let Header(_, request_api_key, request_api_version, _) = header
-  validate_version(request_api_key, request_api_version)
+  UnsupportedApiKey
 }
 
 pub fn parse_msg(msg: BitArray) -> Result(RequestHeader, ParseHeaderError) {
@@ -62,7 +16,10 @@ pub fn parse_msg(msg: BitArray) -> Result(RequestHeader, ParseHeaderError) {
       correlation_id:32,
       _rest:bits,
     >> -> {
-      use request_api_key <- result.try(api_key_from_int(request_api_key))
+      use request_api_key <- result.try(
+        request.api_key_from_int(request_api_key)
+        |> option.to_result(UnsupportedApiKey),
+      )
 
       Ok(Header(
         message_size,
