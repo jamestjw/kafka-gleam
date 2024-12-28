@@ -1,4 +1,3 @@
-// import gleam/option.{None, Some}
 import gleam/dict
 import gleam/result
 
@@ -19,16 +18,18 @@ pub type RequestHeader {
 
 pub type ApiKey {
   ApiVersions
+  DescribeTopicPartitions
 }
 
 pub fn supported_apis() {
-  dict.from_list([#(ApiVersions, #(3, 4))])
+  dict.from_list([#(ApiVersions, #(0, 4)), #(DescribeTopicPartitions, #(0, 0))])
 }
 
 // TODO: implement the same function that does the conversion the other way
 fn api_key_from_int(i) {
   case i {
     18 -> Ok(ApiVersions)
+    75 -> Ok(DescribeTopicPartitions)
     _ -> Error(UnsupportedApiKey)
   }
 }
@@ -36,6 +37,7 @@ fn api_key_from_int(i) {
 pub fn api_key_to_int(api_key) {
   case api_key {
     ApiVersions -> 18
+    DescribeTopicPartitions -> 75
   }
 }
 
@@ -62,16 +64,12 @@ pub fn parse_msg(msg: BitArray) -> Result(RequestHeader, ParseHeaderError) {
     >> -> {
       use request_api_key <- result.try(api_key_from_int(request_api_key))
 
-      // case validate_version(request_api_key, request_api_version) {
-      //   False -> Error(UnsupportedApiVersion)
-      //   True ->
       Ok(Header(
         message_size,
         request_api_key,
         request_api_version,
         correlation_id,
       ))
-      // }
     }
     _ -> Error(MalformedHeader)
   }

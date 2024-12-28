@@ -44,6 +44,7 @@ fn handle_request(msg) {
     True ->
       case header.request_api_key {
         parser.ApiVersions -> handle_api_versions_v3(header.correlation_id)
+        _ -> panic as "not implemented yet"
       }
   }
 }
