@@ -1,13 +1,17 @@
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/dict
 import request.{type RequestHeader, Header}
 
 type ErrorCode {
+  NoError
+  UnknownTopicOrPartition
   UnsupportedVersion
 }
 
 fn error_code_to_int(err) {
   case err {
+    NoError -> 0
+    UnknownTopicOrPartition -> 3
     UnsupportedVersion -> 35
   }
 }
@@ -21,13 +25,14 @@ pub fn supported_apis() {
   ])
 }
 
-fn build_header(correlation_id, body_size) {
+fn build_header(bytes, correlation_id) {
   // The size doesn't include the int of the size itself, hence the 4 here
   // is for the correlation ID
-  let total_size = body_size + 4
-  bytes_builder.new()
-  |> bytes_builder.append(<<total_size:size(32)>>)
-  |> bytes_builder.append(<<correlation_id:size(32)>>)
+  let total_size = bytes_tree.byte_size(bytes) + 4
+  bytes_tree.new()
+  |> bytes_tree.append(<<total_size:size(32)>>)
+  |> bytes_tree.append(<<correlation_id:size(32)>>)
+  |> bytes_tree.append_tree(bytes)
 }
 
 // Returns the encoding in the form of a BitArray
@@ -39,6 +44,11 @@ fn encode_unsigned_varint(i) {
   }
 }
 
+fn append_error_code(bytes, err_code) {
+  bytes
+  |> bytes_tree.append(<<error_code_to_int(err_code):size(16)>>)
+}
+
 fn handle_api_versions_v3(correlation_id) {
   let append_supported_apis = fn(bytes) {
     let supported_apis = supported_apis()
@@ -46,45 +56,49 @@ fn handle_api_versions_v3(correlation_id) {
     let encoded_sz = encode_unsigned_varint(dict.size(supported_apis) + 1)
 
     bytes
-    |> bytes_builder.append(encoded_sz)
+    |> bytes_tree.append(encoded_sz)
     |> dict.fold(
       supported_apis,
       _,
       fn(bytes, api_key, versions) {
         let #(lower, upper) = versions
         bytes
-        |> bytes_builder.append(<<request.api_key_to_int(api_key):size(16)>>)
-        |> bytes_builder.append(<<lower:size(16)>>)
-        |> bytes_builder.append(<<upper:size(16)>>)
-        |> bytes_builder.append(empty_tagged_field_buffer)
+        |> bytes_tree.append(<<request.api_key_to_int(api_key):size(16)>>)
+        |> bytes_tree.append(<<lower:size(16)>>)
+        |> bytes_tree.append(<<upper:size(16)>>)
+        |> bytes_tree.append(empty_tagged_field_buffer)
       },
     )
   }
 
-  let body =
-    bytes_builder.new()
-    // no error
-    |> bytes_builder.append(<<0:size(16)>>)
-    |> append_supported_apis()
-    // throttle time ms
-    |> bytes_builder.append(<<0:size(32)>>)
-    |> bytes_builder.append(empty_tagged_field_buffer)
+  bytes_tree.new()
+  |> append_error_code(NoError)
+  |> append_supported_apis()
+  // throttle time ms
+  |> bytes_tree.append(<<0:size(32)>>)
+  |> bytes_tree.append(empty_tagged_field_buffer)
+  |> build_header(correlation_id)
+}
 
-  build_header(correlation_id, bytes_builder.byte_size(body))
-  |> bytes_builder.append_builder(body)
+fn handle_describe_topic_partitions_v0(correlation_id) {
+  bytes_tree.new()
+  |> append_error_code(UnknownTopicOrPartition)
+  |> build_header(correlation_id)
 }
 
 pub fn build_unsupported_version_resp(correlation_id) {
-  bytes_builder.new()
-  |> bytes_builder.append(<<10:size(32)>>)
-  |> bytes_builder.append(<<correlation_id:size(32)>>)
-  |> bytes_builder.append(<<error_code_to_int(UnsupportedVersion):size(16)>>)
+  bytes_tree.new()
+  |> bytes_tree.append(<<10:size(32)>>)
+  |> bytes_tree.append(<<correlation_id:size(32)>>)
+  |> bytes_tree.append(<<error_code_to_int(UnsupportedVersion):size(16)>>)
 }
 
 pub fn process_request(header: RequestHeader) {
   case header.request_api_key {
     request.ApiVersions -> handle_api_versions_v3(header.correlation_id)
-    _ -> panic as "not implemented yet"
+    request.DescribeTopicPartitions ->
+      handle_describe_topic_partitions_v0(header.correlation_id)
+    // _ -> panic as "not implemented yet"
   }
 }
 
@@ -96,6 +110,6 @@ fn is_api_supported(key, version) {
 }
 
 pub fn validate_header_api_version(header) {
-  let Header(_, request_api_key, request_api_version, _) = header
+  let Header(_, request_api_key, request_api_version, _, _) = header
   is_api_supported(request_api_key, request_api_version)
 }

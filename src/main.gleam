@@ -5,11 +5,11 @@ import gleam/otp/actor
 import glisten.{Packet}
 import parser
 import server
+import utils
 
 pub fn main() {
   let assert Ok(_) =
     glisten.handler(fn(_conn) { #(Nil, None) }, fn(msg, state, conn) {
-      io.println("received connection")
       let resp = handle_request(msg)
       let assert Ok(_) = glisten.send(conn, resp)
       actor.continue(state)
@@ -21,9 +21,14 @@ pub fn main() {
 
 fn handle_request(msg) {
   let assert Packet(msg) = msg
-  let assert Ok(header) = parser.parse_msg(msg)
-  case server.validate_header_api_version(header) {
-    False -> server.build_unsupported_version_resp(header.correlation_id)
-    True -> server.process_request(header)
+
+  io.println("Received message:")
+  io.debug(utils.bit_array_to_hex(msg))
+
+  case parser.parse_msg(msg) {
+    Ok(#(header, _body)) -> server.process_request(header)
+    Error(parser.UnsupportedApiKey(correlation_id)) ->
+      server.build_unsupported_version_resp(correlation_id)
+    Error(_) -> panic
   }
 }

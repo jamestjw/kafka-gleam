@@ -1,4 +1,4 @@
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 
 pub type RequestHeader {
   Header(
@@ -6,6 +6,15 @@ pub type RequestHeader {
     request_api_key: ApiKey,
     request_api_version: Int,
     correlation_id: Int,
+    client_id: Option(String),
+  )
+}
+
+pub type RequestBody {
+  ApiVersionsBody
+  DescribeTopicPartitionsBody(
+    topics: List(String),
+    response_partition_limit: Int,
   )
 }
 
