@@ -1,6 +1,8 @@
 import gleam/bytes_tree
 import gleam/dict
-import request.{type RequestHeader, Header}
+import gleam/list
+import gleam/string
+import request.{type RequestBody, type RequestHeader, Header}
 
 type ErrorCode {
   NoError
@@ -25,13 +27,26 @@ pub fn supported_apis() {
   ])
 }
 
-fn build_header(bytes, correlation_id) {
+fn build_response_header_v0(bytes, correlation_id) {
   // The size doesn't include the int of the size itself, hence the 4 here
   // is for the correlation ID
   let total_size = bytes_tree.byte_size(bytes) + 4
   bytes_tree.new()
   |> bytes_tree.append(<<total_size:size(32)>>)
   |> bytes_tree.append(<<correlation_id:size(32)>>)
+  |> bytes_tree.append_tree(bytes)
+}
+
+// Turns out that different APIs expect different versions of the response
+// header
+fn build_response_header_v1(bytes, correlation_id) {
+  // The size doesn't include the int of the size itself, hence the 5 here
+  // is for the correlation ID and the tagged field
+  let total_size = bytes_tree.byte_size(bytes) + 4 + 1
+  bytes_tree.new()
+  |> bytes_tree.append(<<total_size:size(32)>>)
+  |> bytes_tree.append(<<correlation_id:size(32)>>)
+  |> bytes_tree.append(empty_tagged_field_buffer)
   |> bytes_tree.append_tree(bytes)
 }
 
@@ -47,6 +62,11 @@ fn encode_unsigned_varint(i) {
 fn append_error_code(bytes, err_code) {
   bytes
   |> bytes_tree.append(<<error_code_to_int(err_code):size(16)>>)
+}
+
+fn append_throttle_time(bytes, ms) {
+  bytes
+  |> bytes_tree.append(<<ms:size(32)>>)
 }
 
 fn handle_api_versions_v3(correlation_id) {
@@ -75,15 +95,45 @@ fn handle_api_versions_v3(correlation_id) {
   |> append_error_code(NoError)
   |> append_supported_apis()
   // throttle time ms
-  |> bytes_tree.append(<<0:size(32)>>)
+  |> append_throttle_time(0)
   |> bytes_tree.append(empty_tagged_field_buffer)
-  |> build_header(correlation_id)
+  |> build_response_header_v0(correlation_id)
 }
 
-fn handle_describe_topic_partitions_v0(correlation_id) {
-  bytes_tree.new()
+// TODO: don't hardcode this
+fn append_topic_authorized_operations(bytes) {
+  bytes
+  |> bytes_tree.append(<<0x00000df8:32>>)
+}
+
+fn append_topic(bytes, topic) {
+  bytes
   |> append_error_code(UnknownTopicOrPartition)
-  |> build_header(correlation_id)
+  |> encode_compact_string(topic)
+  // 16 bytes topic UUID
+  |> bytes_tree.append(<<0:128>>)
+  // Is topic internal (boolean)
+  |> encode_boolean(False)
+  // Partitions Array (empty for now)
+  |> append_unsigned_varint(1)
+  |> append_topic_authorized_operations()
+  |> bytes_tree.append(empty_tagged_field_buffer)
+}
+
+fn append_topics_response(bytes, topics) {
+  bytes
+  |> bytes_tree.append(encode_unsigned_varint(list.length(topics) + 1))
+  |> list.fold(topics, _, append_topic)
+}
+
+fn handle_describe_topic_partitions_v0(correlation_id, topics) {
+  bytes_tree.new()
+  |> append_throttle_time(0)
+  |> append_topics_response(topics)
+  // Cursor for pagination, null for now
+  |> append_null()
+  |> append_tag_buffer()
+  |> build_response_header_v1(correlation_id)
 }
 
 pub fn build_unsupported_version_resp(correlation_id) {
@@ -93,12 +143,11 @@ pub fn build_unsupported_version_resp(correlation_id) {
   |> bytes_tree.append(<<error_code_to_int(UnsupportedVersion):size(16)>>)
 }
 
-pub fn process_request(header: RequestHeader) {
-  case header.request_api_key {
-    request.ApiVersions -> handle_api_versions_v3(header.correlation_id)
-    request.DescribeTopicPartitions ->
-      handle_describe_topic_partitions_v0(header.correlation_id)
-    // _ -> panic as "not implemented yet"
+pub fn process_request(header: RequestHeader, body: RequestBody) {
+  case body {
+    request.ApiVersionsBody -> handle_api_versions_v3(header.correlation_id)
+    request.DescribeTopicPartitionsBody(topics, _) ->
+      handle_describe_topic_partitions_v0(header.correlation_id, topics)
   }
 }
 
@@ -112,4 +161,34 @@ fn is_api_supported(key, version) {
 pub fn validate_header_api_version(header) {
   let Header(_, request_api_key, request_api_version, _, _) = header
   is_api_supported(request_api_key, request_api_version)
+}
+
+fn encode_compact_string(bytes, str) {
+  bytes
+  |> bytes_tree.append(encode_unsigned_varint(string.length(str) + 1))
+  |> bytes_tree.append_string(str)
+}
+
+fn encode_boolean(bytes, bool) {
+  case bool {
+    True ->
+      bytes
+      |> bytes_tree.append(<<1:8>>)
+    False ->
+      bytes
+      |> bytes_tree.append(<<0:8>>)
+  }
+}
+
+fn append_unsigned_varint(bytes, i) {
+  bytes |> bytes_tree.append(encode_unsigned_varint(i))
+}
+
+fn append_null(bytes) {
+  bytes |> bytes_tree.append(<<0xff:8>>)
+}
+
+fn append_tag_buffer(bytes) {
+  bytes
+  |> bytes_tree.append(empty_tagged_field_buffer)
 }

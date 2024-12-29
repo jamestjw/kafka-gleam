@@ -26,7 +26,7 @@ fn handle_request(msg) {
   io.debug(utils.bit_array_to_hex(msg))
 
   case parser.parse_msg(msg) {
-    Ok(#(header, _body)) -> server.process_request(header)
+    Ok(#(header, body)) -> server.process_request(header, body)
     Error(parser.UnsupportedApiKey(correlation_id)) ->
       server.build_unsupported_version_resp(correlation_id)
     Error(_) -> panic
