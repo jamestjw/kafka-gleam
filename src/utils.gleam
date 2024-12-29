@@ -1,3 +1,4 @@
+import gleam/result
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/int
@@ -23,10 +24,14 @@ pub fn bit_array_to_hex(bits: BitArray) -> String {
   }
 }
 
-pub fn bits_to_int(bits) {
+pub fn bits_to_unsigned_int(bits) {
   let len = bit_array.bit_size(bits)
   case bits {
-    <<bits:size(len)>> -> bits
+    <<bits:unsigned-size(len)>> -> bits
     _ -> panic as "impossible"
   }
+}
+
+pub fn result_swap_error(res, err) {
+  result.map_error(res, fn(_) { err })
 }

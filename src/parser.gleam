@@ -5,7 +5,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import request.{type RequestBody, type RequestHeader, Header}
 import server
-import utils
+import parser/internal.{parse_unsigned_varint}
 
 pub type ParseError {
   MalformedHeader
@@ -100,25 +100,9 @@ fn parse_body(header: RequestHeader, bits: BitArray) {
   }
 }
 
-fn parse_varint_inner(bits, acc) {
-  case bits {
-    <<cont:1, bits:7, rest:bits>> if cont == 0 -> {
-      let varint = bit_array.append(<<bits:7>>, acc) |> utils.bits_to_int()
-      Ok(#(varint, rest))
-    }
-    <<cont:1, bits:7, rest:bits>> if cont == 1 -> {
-      parse_varint_inner(rest, bit_array.append(<<bits:7>>, acc))
-    }
-    _ -> Error(Nil)
-  }
-}
-
-fn parse_varint(bits) {
-  parse_varint_inner(bits, <<>>)
-}
 
 fn parse_compact_string(bits) {
-  use #(n, rest) <- result.try(parse_varint(bits))
+  use #(n, rest) <- result.try(parse_unsigned_varint(bits))
   let str_len = n - 1
   use #(str_bits, rest) <- result.try(bit_array_split(rest, str_len))
   use str <- result.try(bit_array.to_string(str_bits))
@@ -143,7 +127,7 @@ fn parse_topics(bits, n, acc) {
 }
 
 fn parse_describe_topic_partitions_req(body: BitArray) {
-  use #(n, rest) <- result.try(parse_varint(body))
+  use #(n, rest) <- result.try(parse_unsigned_varint(body))
   let num_topics = n - 1
   use #(topics, rest) <- result.try(parse_topics(rest, num_topics, []))
   case rest {
