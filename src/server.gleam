@@ -1,3 +1,4 @@
+import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dict
 import gleam/list
@@ -53,11 +54,16 @@ fn build_response_header_v1(bytes, correlation_id) {
 }
 
 // Returns the encoding in the form of a BitArray
-fn encode_unsigned_varint(i) {
+pub fn encode_unsigned_varint(i) {
   case i >= 0 && i <= 0b1111111 {
+    // MSB (i.e. the continuation bit) is already 0
     True -> <<i:size(8)>>
-    // this is fine as the continuation bit is 0
-    False -> todo as "actually encode this"
+    False -> {
+      // 128 = 2 ^ 7
+      let rem = i % 128
+      let rest = i / 128
+      bit_array.append(<<1:1, rem:7>>, encode_unsigned_varint(rest))
+    }
   }
 }
 
