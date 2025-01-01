@@ -3,9 +3,11 @@ import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
+import parser/internal.{
+  bit_array_split, parse_compact_string, parse_unsigned_varint,
+}
 import request.{type RequestBody, type RequestHeader, Header}
 import server
-import parser/internal.{parse_unsigned_varint}
 
 pub type ParseError {
   MalformedHeader
@@ -82,13 +84,6 @@ fn parse_header(msg: BitArray) -> Result(#(RequestHeader, BitArray), ParseError)
   }
 }
 
-fn bit_array_split(bits, n) {
-  let num_bytes = bit_array.byte_size(bits)
-  use left <- result.try(bit_array.slice(bits, 0, n))
-  use right <- result.try(bit_array.slice(bits, n, num_bytes - n))
-  Ok(#(left, right))
-}
-
 fn parse_body(header: RequestHeader, bits: BitArray) {
   case header.request_api_key {
     request.ApiVersions -> Ok(request.ApiVersionsBody)
@@ -98,15 +93,6 @@ fn parse_body(header: RequestHeader, bits: BitArray) {
         MalformedBody("bad DescribeTopicPartitions body")
       })
   }
-}
-
-
-fn parse_compact_string(bits) {
-  use #(n, rest) <- result.try(parse_unsigned_varint(bits))
-  let str_len = n - 1
-  use #(str_bits, rest) <- result.try(bit_array_split(rest, str_len))
-  use str <- result.try(bit_array.to_string(str_bits))
-  Ok(#(str, rest))
 }
 
 fn parse_topic(bits) {

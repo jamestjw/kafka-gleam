@@ -1,7 +1,7 @@
-import gleam/result
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/int
+import gleam/result
 import gleam/string
 
 pub fn bytes_tree_to_hex(bt) -> String {
@@ -34,4 +34,8 @@ pub fn bits_to_unsigned_int(bits) {
 
 pub fn result_swap_error(res, err) {
   result.map_error(res, fn(_) { err })
+}
+
+pub fn result_try_with_err(res, err, cb) {
+  result_swap_error(res, err) |> result.try(cb)
 }
