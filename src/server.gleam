@@ -165,7 +165,8 @@ fn append_topic(bytes, state: State, topic) {
       |> bytes_tree.append(<<topic_uuid:128>>)
       // Is topic internal (boolean)
       |> encode_boolean(False)
-      |> append_topic_partitions(partitions)
+      // Looks like order matters and it should be ascending
+      |> append_topic_partitions(list.reverse(partitions))
       |> append_topic_authorized_operations()
       |> bytes_tree.append(empty_tagged_field_buffer)
     }
