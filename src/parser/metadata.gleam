@@ -197,11 +197,11 @@ fn parse_record(bytes) {
 pub fn parse_record_batch(bytes) {
   case bytes {
     <<
-      base_offset:64,
-      batch_length:32,
-      partition_leader_epoch:32,
-      magic_bytes:8,
-      crc:32,
+      base_offset:signed-64,
+      batch_length:signed-32,
+      partition_leader_epoch:signed-32,
+      magic_bytes:signed-8,
+      crc:signed-32,
       attrs:16,
       last_offset_delta:32,
       base_timestamp:64,
@@ -238,5 +238,18 @@ pub fn parse_record_batch(bytes) {
       ))
     }
     _ -> Error(MalformedRecordBatch)
+  }
+}
+
+pub fn parse_record_batches(
+  bytes,
+) -> Result(List(RecordBatch), ParseMetadataError) {
+  use #(record_batch, bytes) <- result.try(parse_record_batch(bytes))
+  case bytes {
+    <<>> -> Ok([record_batch])
+    bytes -> {
+      use record_batches <- result.try(parse_record_batches(bytes))
+      Ok([record_batch, ..record_batches])
+    }
   }
 }

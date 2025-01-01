@@ -9,6 +9,7 @@ gleam_stdlib = "~> 0.51"
 gleam_erlang = "~> 0.25"
 gleam_otp = "~> 0.10"
 glisten = "~> 7.0"
+simplifile = ">= 2.2.0 and < 3.0.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

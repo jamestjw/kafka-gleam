@@ -1,8 +1,10 @@
 import gleam/bytes_tree
 import gleam/dict
 import gleam/list
+import gleam/result
 import gleam/string
 import request.{type RequestBody, type RequestHeader, Header}
+import state.{type State}
 
 type ErrorCode {
   NoError
@@ -100,36 +102,94 @@ fn handle_api_versions_v3(correlation_id) {
   |> build_response_header_v0(correlation_id)
 }
 
+fn append_compact_array(bytes, elems, append_fn) {
+  bytes
+  |> bytes_tree.append(encode_unsigned_varint(list.length(elems) + 1))
+  |> list.fold(elems, _, append_fn)
+}
+
+fn append_n_bytes(bytes, i, n) {
+  let num_bits = n * 8
+  bytes_tree.append(bytes, <<i:size(num_bits)>>)
+}
+
+fn append_4_bytes(bytes, i) {
+  append_n_bytes(bytes, i, 4)
+}
+
 // TODO: don't hardcode this
 fn append_topic_authorized_operations(bytes) {
   bytes
   |> bytes_tree.append(<<0x00000df8:32>>)
 }
 
-fn append_topic(bytes, topic) {
+fn append_topic_partitions(bytes, partitions: List(state.Partition)) {
+  let append_partition = fn(bytes, partition) {
+    let state.Partition(
+      id:,
+      leader_replica_id:,
+      leader_epoch:,
+      replica_ids:,
+      in_sync_replica_ids:,
+      ..,
+    ) = partition
+    bytes
+    |> append_error_code(NoError)
+    |> append_4_bytes(id)
+    |> append_4_bytes(leader_replica_id)
+    |> append_4_bytes(leader_epoch)
+    |> append_compact_array(replica_ids, append_4_bytes)
+    |> append_compact_array(in_sync_replica_ids, append_4_bytes)
+    // TODO: eligible leader replicas
+    |> append_compact_array([], append_4_bytes)
+    // TODO: last known eligible leader replicas
+    |> append_compact_array([], append_4_bytes)
+    // TODO: offline replicas
+    |> append_compact_array([], append_4_bytes)
+    |> append_tag_buffer()
+  }
   bytes
-  |> append_error_code(UnknownTopicOrPartition)
-  |> encode_compact_string(topic)
-  // 16 bytes topic UUID
-  |> bytes_tree.append(<<0:128>>)
-  // Is topic internal (boolean)
-  |> encode_boolean(False)
-  // Partitions Array (empty for now)
-  |> append_unsigned_varint(1)
-  |> append_topic_authorized_operations()
-  |> bytes_tree.append(empty_tagged_field_buffer)
+  |> append_unsigned_varint(list.length(partitions) + 1)
+  |> list.fold(partitions, _, append_partition)
 }
 
-fn append_topics_response(bytes, topics) {
-  bytes
-  |> bytes_tree.append(encode_unsigned_varint(list.length(topics) + 1))
-  |> list.fold(topics, _, append_topic)
+fn append_topic(bytes, state: State, topic) {
+  case dict.get(state.topic_to_id, topic) {
+    Ok(topic_uuid) -> {
+      let partitions =
+        dict.get(state.topic_uuid_to_partition, topic_uuid) |> result.unwrap([])
+      bytes
+      |> append_error_code(NoError)
+      |> encode_compact_string(topic)
+      // 16 bytes topic UUID
+      |> bytes_tree.append(<<topic_uuid:128>>)
+      // Is topic internal (boolean)
+      |> encode_boolean(False)
+      |> append_topic_partitions(partitions)
+      |> append_topic_authorized_operations()
+      |> bytes_tree.append(empty_tagged_field_buffer)
+    }
+    Error(_) ->
+      bytes
+      |> append_error_code(UnknownTopicOrPartition)
+      |> encode_compact_string(topic)
+      // 16 bytes topic UUID
+      |> bytes_tree.append(<<0:128>>)
+      // Is topic internal (boolean)
+      |> encode_boolean(False)
+      // Empty partitions array
+      |> append_unsigned_varint(1)
+      |> append_topic_authorized_operations()
+      |> bytes_tree.append(empty_tagged_field_buffer)
+  }
 }
 
-fn handle_describe_topic_partitions_v0(correlation_id, topics) {
+fn handle_describe_topic_partitions_v0(state, correlation_id, topics) {
   bytes_tree.new()
   |> append_throttle_time(0)
-  |> append_topics_response(topics)
+  |> append_compact_array(topics, fn(bytes, topic) {
+    append_topic(bytes, state, topic)
+  })
   // Cursor for pagination, null for now
   |> append_null()
   |> append_tag_buffer()
@@ -143,11 +203,11 @@ pub fn build_unsupported_version_resp(correlation_id) {
   |> bytes_tree.append(<<error_code_to_int(UnsupportedVersion):size(16)>>)
 }
 
-pub fn process_request(header: RequestHeader, body: RequestBody) {
+pub fn process_request(state: State, header: RequestHeader, body: RequestBody) {
   case body {
     request.ApiVersionsBody -> handle_api_versions_v3(header.correlation_id)
     request.DescribeTopicPartitionsBody(topics, _) ->
-      handle_describe_topic_partitions_v0(header.correlation_id, topics)
+      handle_describe_topic_partitions_v0(state, header.correlation_id, topics)
   }
 }
 
