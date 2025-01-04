@@ -27,6 +27,7 @@ pub fn supported_apis() {
   dict.from_list([
     #(request.ApiVersions, #(0, 4)),
     #(request.DescribeTopicPartitions, #(0, 0)),
+    #(request.Fetch, #(0, 16)),
   ])
 }
 

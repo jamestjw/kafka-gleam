@@ -92,6 +92,7 @@ fn parse_body(header: RequestHeader, bits: BitArray) {
       |> result.map_error(fn(_) {
         MalformedBody("bad DescribeTopicPartitions body")
       })
+    request.Fetch -> todo
   }
 }
 
