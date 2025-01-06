@@ -86,18 +86,14 @@ fn handle_api_versions_v3(correlation_id) {
 
     bytes
     |> bytes_tree.append(encoded_sz)
-    |> dict.fold(
-      supported_apis,
-      _,
-      fn(bytes, api_key, versions) {
-        let #(lower, upper) = versions
-        bytes
-        |> bytes_tree.append(<<request.api_key_to_int(api_key):size(16)>>)
-        |> bytes_tree.append(<<lower:size(16)>>)
-        |> bytes_tree.append(<<upper:size(16)>>)
-        |> bytes_tree.append(empty_tagged_field_buffer)
-      },
-    )
+    |> dict.fold(supported_apis, _, fn(bytes, api_key, versions) {
+      let #(lower, upper) = versions
+      bytes
+      |> bytes_tree.append(<<request.api_key_to_int(api_key):size(16)>>)
+      |> bytes_tree.append(<<lower:size(16)>>)
+      |> bytes_tree.append(<<upper:size(16)>>)
+      |> bytes_tree.append(empty_tagged_field_buffer)
+    })
   }
 
   bytes_tree.new()
@@ -211,11 +207,23 @@ pub fn build_unsupported_version_resp(correlation_id) {
   |> bytes_tree.append(<<error_code_to_int(UnsupportedVersion):size(16)>>)
 }
 
+fn handle_fetch(_state, correlation_id, body) {
+  let assert request.FetchBody(session_id:, ..) = body
+  bytes_tree.new()
+  |> append_throttle_time(0)
+  |> append_error_code(NoError)
+  |> append_4_bytes(session_id)
+  |> append_compact_array([], fn(bytes, _topic) { bytes })
+  |> append_tag_buffer()
+  |> build_response_header_v1(correlation_id)
+}
+
 pub fn process_request(state: State, header: RequestHeader, body: RequestBody) {
   case body {
     request.ApiVersionsBody -> handle_api_versions_v3(header.correlation_id)
     request.DescribeTopicPartitionsBody(topics, _) ->
       handle_describe_topic_partitions_v0(state, header.correlation_id, topics)
+    request.FetchBody(..) -> handle_fetch(state, header.correlation_id, body)
   }
 }
 

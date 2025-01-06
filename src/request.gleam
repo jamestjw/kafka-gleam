@@ -16,6 +16,30 @@ pub type RequestBody {
     topics: List(String),
     response_partition_limit: Int,
   )
+  FetchBody(
+    max_wait_ms: Int,
+    min_bytes: Int,
+    max_bytes: Int,
+    isolation_level: Int,
+    session_id: Int,
+    session_epoch: Int,
+    // List of tuples of topic_id * partitions
+    topics: List(#(Int, List(FetchTopicPartition))),
+    // Tuple of topic_id, partition_ids
+    forgotten_topics: List(#(Int, List(Int))),
+    rack_id: String,
+  )
+}
+
+pub type FetchTopicPartition {
+  FetchTopicPartition(
+    id: Int,
+    current_leader_epoch: Int,
+    fetch_offset: Int,
+    last_fetched_epoch: Int,
+    log_start_offset: Int,
+    partition_max_bytes: Int,
+  )
 }
 
 pub type ApiKey {

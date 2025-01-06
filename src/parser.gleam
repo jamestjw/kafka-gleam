@@ -4,7 +4,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import parser/internal.{
-  bit_array_split, parse_compact_string, parse_unsigned_varint,
+  bit_array_split, parse_compact_array, parse_compact_string, parse_n_bytes,
+  parse_unsigned_varint,
 }
 import request.{type RequestBody, type RequestHeader, Header}
 import server
@@ -92,7 +93,11 @@ fn parse_body(header: RequestHeader, bits: BitArray) {
       |> result.map_error(fn(_) {
         MalformedBody("bad DescribeTopicPartitions body")
       })
-    request.Fetch -> todo
+    request.Fetch ->
+      parse_fetch_req(bits)
+      |> result.map_error(fn(_) {
+        MalformedBody("bad DescribeTopicPartitions body")
+      })
   }
 }
 
@@ -123,3 +128,91 @@ fn parse_describe_topic_partitions_req(body: BitArray) {
     _ -> Error(Nil)
   }
 }
+
+// Parse Fetch START
+
+fn parse_fetch_forgotten_topic_data(bits) {
+  use #(topic_uuid, bits) <- result.try(parse_n_bytes(bits, 16))
+  use #(partition_ids, bits) <- result.try(
+    parse_compact_array(bits, parse_n_bytes(_, 4)),
+  )
+  Ok(#(#(topic_uuid, partition_ids), bits))
+}
+
+fn parse_fetch_topic_partition(bits) {
+  case bits {
+    <<
+      id:32,
+      current_leader_epoch:32,
+      fetch_offset:64,
+      last_fetched_epoch:32,
+      log_start_offset:64,
+      partition_max_bytes:32,
+      rest:bits,
+    >> ->
+      Ok(#(
+        request.FetchTopicPartition(
+          id:,
+          current_leader_epoch:,
+          fetch_offset:,
+          last_fetched_epoch:,
+          log_start_offset:,
+          partition_max_bytes:,
+        ),
+        rest,
+      ))
+    _ -> Error(Nil)
+  }
+}
+
+fn parse_fetch_topic(bits) {
+  use #(topic_uuid, bits) <- result.try(parse_n_bytes(bits, 16))
+  use #(partitions, bits) <- result.try(parse_compact_array(
+    bits,
+    parse_fetch_topic_partition,
+  ))
+  use #(_tag_buffer, bits) <- result.try(bit_array_split(bits, 1))
+  Ok(#(#(topic_uuid, partitions), bits))
+}
+
+fn parse_fetch_req(bits: BitArray) {
+  case bits {
+    <<
+      max_wait_ms:32,
+      min_bytes:32,
+      max_bytes:32,
+      isolation_level:8,
+      session_id:32,
+      session_epoch:32,
+      bits:bits,
+    >> -> {
+      use #(topics, bits) <- result.try(parse_compact_array(
+        bits,
+        parse_fetch_topic,
+      ))
+      use #(forgotten_topics, bits) <- result.try(parse_compact_array(
+        bits,
+        parse_fetch_forgotten_topic_data,
+      ))
+      use #(rack_id, bits) <- result.try(parse_compact_string(bits))
+      case bit_array_split(bits, 1) {
+        Ok(#(_tag_buffer, <<>>)) ->
+          Ok(request.FetchBody(
+            max_wait_ms:,
+            min_bytes:,
+            max_bytes:,
+            isolation_level:,
+            session_id:,
+            session_epoch:,
+            topics:,
+            forgotten_topics:,
+            rack_id:,
+          ))
+        _ -> Error(Nil)
+      }
+    }
+
+    _ -> Error(Nil)
+  }
+}
+// Parse Fetch END
