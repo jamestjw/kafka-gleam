@@ -61,6 +61,7 @@ pub fn parse_compact_string(bits) {
   use #(str_len, rest) <- result.try(
     parse_unsigned_varint(bits) |> result.map(fn(x) { #(x.0 - 1, x.1) }),
   )
+  let assert True = str_len >= 0
   use #(str_bits, rest) <- result.try(bit_array_split(rest, str_len))
   use str <- result.try(bit_array.to_string(str_bits))
   Ok(#(str, rest))
@@ -69,7 +70,10 @@ pub fn parse_compact_string(bits) {
 fn parse_array_helper(bytes, len, parse_elem, acc) {
   case len {
     0 -> Ok(#(list.reverse(acc), bytes))
-    n if n < 0 -> panic as "n is an unsigned integer"
+    -1 -> Ok(#([], bytes))
+    n if n < 0 -> {
+      panic as "n should not be negative!"
+    }
     n -> {
       use #(record, bytes) <- result.try(parse_elem(bytes))
       parse_array_helper(bytes, n - 1, parse_elem, [record, ..acc])

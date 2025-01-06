@@ -66,6 +66,8 @@ fn handle_request(state, msg) {
     Ok(#(header, body)) -> server.process_request(state, header, body)
     Error(parser.UnsupportedApiKey(correlation_id)) ->
       server.build_unsupported_version_resp(correlation_id)
-    Error(_) -> panic
+    Error(e) -> {
+      panic as string.inspect(e)
+    }
   }
 }

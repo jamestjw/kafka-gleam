@@ -1,6 +1,7 @@
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dict
+import gleam/io
 import gleam/list
 import gleam/result
 import gleam/string
@@ -11,6 +12,7 @@ type ErrorCode {
   NoError
   UnknownTopicOrPartition
   UnsupportedVersion
+  UnknownTopic
 }
 
 fn error_code_to_int(err) {
@@ -18,6 +20,7 @@ fn error_code_to_int(err) {
     NoError -> 0
     UnknownTopicOrPartition -> 3
     UnsupportedVersion -> 35
+    UnknownTopic -> 100
   }
 }
 
@@ -208,12 +211,41 @@ pub fn build_unsupported_version_resp(correlation_id) {
 }
 
 fn handle_fetch(_state, correlation_id, body) {
-  let assert request.FetchBody(session_id:, ..) = body
+  let append_partition = fn(bytes, partition: request.FetchTopicPartition) {
+    bytes
+    // partition index
+    |> append_4_bytes(partition.id)
+    // TODO: should this be zero?
+    |> append_error_code(UnknownTopic)
+    // high watermark
+    |> append_n_bytes(0, 8)
+    // last_stable_offset
+    |> append_n_bytes(0, 8)
+    // log_start_offset
+    |> append_n_bytes(0, 8)
+    // aborted_transactions => producer_id first_offset TAG_BUFFER
+    |> append_compact_array([], fn(bytes, _) { bytes })
+    // preferred_read_replica => INT32
+    |> append_n_bytes(0, 4)
+    // records => COMPACT_RECORDS
+    // TODO: whats this?
+    |> append_compact_array([], fn(bytes, _) { bytes })
+    |> append_tag_buffer()
+  }
+  let append_topic = fn(bytes, topic) {
+    let #(topic_id, partitions) = topic
+    bytes
+    |> append_n_bytes(topic_id, 16)
+    |> append_compact_array(partitions, append_partition)
+    |> append_tag_buffer()
+  }
+
+  let assert request.FetchBody(session_id:, topics:, ..) = body
   bytes_tree.new()
   |> append_throttle_time(0)
   |> append_error_code(NoError)
   |> append_4_bytes(session_id)
-  |> append_compact_array([], fn(bytes, _topic) { bytes })
+  |> append_compact_array(topics, append_topic)
   |> append_tag_buffer()
   |> build_response_header_v1(correlation_id)
 }

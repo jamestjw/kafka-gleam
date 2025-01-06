@@ -3,9 +3,10 @@ import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
+import gleam/string
 import parser/internal.{
-  bit_array_split, parse_compact_array, parse_compact_string, parse_n_bytes,
-  parse_unsigned_varint,
+  bit_array_split, parse_byte, parse_compact_array, parse_compact_string,
+  parse_n_bytes, parse_unsigned_varint,
 }
 import request.{type RequestBody, type RequestHeader, Header}
 import server
@@ -95,9 +96,7 @@ fn parse_body(header: RequestHeader, bits: BitArray) {
       })
     request.Fetch ->
       parse_fetch_req(bits)
-      |> result.map_error(fn(_) {
-        MalformedBody("bad DescribeTopicPartitions body")
-      })
+      |> result.map_error(fn(_) { MalformedBody("bad Fetch body") })
   }
 }
 
@@ -136,6 +135,7 @@ fn parse_fetch_forgotten_topic_data(bits) {
   use #(partition_ids, bits) <- result.try(
     parse_compact_array(bits, parse_n_bytes(_, 4)),
   )
+  use #(_tag_buffer, bits) <- result.try(bit_array_split(bits, 1))
   Ok(#(#(topic_uuid, partition_ids), bits))
 }
 
@@ -148,6 +148,7 @@ fn parse_fetch_topic_partition(bits) {
       last_fetched_epoch:32,
       log_start_offset:64,
       partition_max_bytes:32,
+      _tag_buffer:8,
       rest:bits,
     >> ->
       Ok(#(
@@ -195,7 +196,7 @@ fn parse_fetch_req(bits: BitArray) {
         parse_fetch_forgotten_topic_data,
       ))
       use #(rack_id, bits) <- result.try(parse_compact_string(bits))
-      case bit_array_split(bits, 1) {
+      case parse_byte(bits) {
         Ok(#(_tag_buffer, <<>>)) ->
           Ok(request.FetchBody(
             max_wait_ms:,
@@ -208,7 +209,10 @@ fn parse_fetch_req(bits: BitArray) {
             forgotten_topics:,
             rack_id:,
           ))
-        _ -> Error(Nil)
+        e -> {
+          io.println("trailing bits? " <> string.inspect(e))
+          Error(Nil)
+        }
       }
     }
 
