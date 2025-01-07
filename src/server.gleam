@@ -1,8 +1,8 @@
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dict
-import gleam/io
 import gleam/list
+import gleam/option
 import gleam/result
 import gleam/string
 import request.{type RequestBody, type RequestHeader, Header}
@@ -210,13 +210,21 @@ pub fn build_unsupported_version_resp(correlation_id) {
   |> bytes_tree.append(<<error_code_to_int(UnsupportedVersion):size(16)>>)
 }
 
-fn handle_fetch(_state, correlation_id, body) {
-  let append_partition = fn(bytes, partition: request.FetchTopicPartition) {
+fn handle_fetch(state: state.State, correlation_id, body) {
+  let append_partition = fn(
+    bytes,
+    partition: #(request.FetchTopicPartition, option.Option(state.Partition)),
+  ) {
+    let #(partition, partition_data) = partition
+    let error_code = case partition_data {
+      option.Some(_) -> NoError
+      option.None -> UnknownTopic
+    }
     bytes
     // partition index
     |> append_4_bytes(partition.id)
     // TODO: should this be zero?
-    |> append_error_code(UnknownTopic)
+    |> append_error_code(error_code)
     // high watermark
     |> append_n_bytes(0, 8)
     // last_stable_offset
@@ -234,9 +242,22 @@ fn handle_fetch(_state, correlation_id, body) {
   }
   let append_topic = fn(bytes, topic) {
     let #(topic_id, partitions) = topic
+    let partitions_data =
+      partitions
+      |> list.map(fn(p: request.FetchTopicPartition) {
+        case dict.get(state.topic_uuid_to_partition, topic_id) {
+          Ok(ps) ->
+            list.find(ps, fn(p2) { p2.id == p.id }) |> option.from_result
+          _ -> option.None
+        }
+      })
+
     bytes
     |> append_n_bytes(topic_id, 16)
-    |> append_compact_array(partitions, append_partition)
+    |> append_compact_array(
+      list.zip(partitions, partitions_data),
+      append_partition,
+    )
     |> append_tag_buffer()
   }
 
