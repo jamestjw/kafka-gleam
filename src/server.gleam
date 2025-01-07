@@ -1,11 +1,12 @@
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dict
+import gleam/int
 import gleam/list
-import gleam/option
 import gleam/result
 import gleam/string
 import request.{type RequestBody, type RequestHeader, Header}
+import simplifile
 import state.{type State}
 
 type ErrorCode {
@@ -160,8 +161,8 @@ fn append_topic_partitions(bytes, partitions: List(state.Partition)) {
 }
 
 fn append_topic(bytes, state: State, topic) {
-  case dict.get(state.topic_to_id, topic) {
-    Ok(topic_uuid) -> {
+  case list.find(state.topics, fn(name_id_pair) { name_id_pair.0 == topic }) {
+    Ok(#(_topic_name, topic_uuid)) -> {
       let partitions =
         dict.get(state.topic_uuid_to_partition, topic_uuid) |> result.unwrap([])
       bytes
@@ -210,15 +211,49 @@ pub fn build_unsupported_version_resp(correlation_id) {
   |> bytes_tree.append(<<error_code_to_int(UnsupportedVersion):size(16)>>)
 }
 
+fn load_partition(topic_name, partition_index) {
+  let log_directory =
+    "/tmp/kraft-combined-logs/"
+    <> topic_name
+    <> "-"
+    <> int.to_string(partition_index)
+  let log_files =
+    simplifile.read_directory(log_directory)
+    |> result.map(list.filter(_, fn(s) { string.ends_with(s, ".log") }))
+
+  case log_files {
+    Ok(files) -> {
+      files
+      |> list.filter_map(fn(name) {
+        simplifile.read_bits(log_directory <> "/" <> name)
+      })
+    }
+    _ -> []
+  }
+}
+
 fn handle_fetch(state: state.State, correlation_id, body) {
   let append_partition = fn(
     bytes,
-    partition: #(request.FetchTopicPartition, option.Option(state.Partition)),
+    topic_id,
+    partition: #(request.FetchTopicPartition, Bool),
   ) {
-    let #(partition, partition_data) = partition
-    let error_code = case partition_data {
-      option.Some(_) -> NoError
-      option.None -> UnknownTopic
+    let #(partition, is_saved_on_disk) = partition
+    let #(error_code, records) = case is_saved_on_disk {
+      True -> {
+        case
+          list.find(state.topics, fn(name_id_pair) {
+            name_id_pair.1 == topic_id
+          })
+        {
+          Ok(#(topic_name, _)) -> {
+            #(NoError, load_partition(topic_name, partition.id))
+          }
+
+          _ -> #(UnknownTopic, [])
+        }
+      }
+      False -> #(UnknownTopic, [])
     }
     bytes
     // partition index
@@ -237,26 +272,27 @@ fn handle_fetch(state: state.State, correlation_id, body) {
     |> append_n_bytes(0, 4)
     // records => COMPACT_RECORDS
     // TODO: whats this?
-    |> append_compact_array([], fn(bytes, _) { bytes })
+    |> append_compact_array(records, fn(bytes, bits) {
+      bytes_tree.append(bytes, bits)
+    })
     |> append_tag_buffer()
   }
   let append_topic = fn(bytes, topic) {
     let #(topic_id, partitions) = topic
-    let partitions_data =
+    let partition_is_on_disk =
       partitions
       |> list.map(fn(p: request.FetchTopicPartition) {
         case dict.get(state.topic_uuid_to_partition, topic_id) {
-          Ok(ps) ->
-            list.find(ps, fn(p2) { p2.id == p.id }) |> option.from_result
-          _ -> option.None
+          Ok(ps) -> list.find(ps, fn(p2) { p2.id == p.id }) |> result.is_ok
+          _ -> False
         }
       })
 
     bytes
     |> append_n_bytes(topic_id, 16)
     |> append_compact_array(
-      list.zip(partitions, partitions_data),
-      append_partition,
+      list.zip(partitions, partition_is_on_disk),
+      fn(bytes, partition) { append_partition(bytes, topic_id, partition) },
     )
     |> append_tag_buffer()
   }

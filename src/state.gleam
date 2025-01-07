@@ -20,24 +20,22 @@ pub type Partition {
 
 pub type State {
   State(
-    topic_to_id: Dict(String, Int),
+    // List of topic name * topic uuid
+    topics: List(#(String, Int)),
     topic_uuid_to_partition: Dict(Int, List(Partition)),
   )
 }
 
 pub fn new() {
-  State(topic_to_id: dict.new(), topic_uuid_to_partition: dict.new())
+  State(topics: [], topic_uuid_to_partition: dict.new())
 }
 
 pub fn load_record_batches(state, record_batches: List(RecordBatch)) {
   let load_record = fn(state, record: Record) {
-    let State(topic_to_id, topic_uuid_to_partition) = state
+    let State(topics, topic_uuid_to_partition) = state
     case record.value {
       metadata.TopicValue(topic_name, topic_uuid) -> {
-        State(
-          ..state,
-          topic_to_id: dict.insert(topic_to_id, topic_name, topic_uuid),
-        )
+        State(..state, topics: [#(topic_name, topic_uuid), ..topics])
       }
       metadata.PartitionValue(
         partition_id:,
